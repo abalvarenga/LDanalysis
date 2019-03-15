@@ -1,0 +1,268 @@
+﻿#-----------------------------------------------------------------------
+# Amanda Botelho Alvarenga
+# https://github.com/abalvarenga
+# abalvarenga@usp.br
+# 2017-dez · Piracicaba/SP/Brazil
+#----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#						                     LINKAGE DISEQUILIBRIUM
+#							https://www.nature.com/articles/s41598-018-27259-7 
+#----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+#Calculalating the linkage disequilibrium using the package genetics
+
+rm(list=ls())
+save(list=ls(all.names=TRUE),file="LD.RData")
+save.image(file="image_LD.RData",safe=TRUE)
+sink("sink-examp.txt")
+
+library("GenABEL")
+convert.snp.illumina(infile="geno",out="geno.raw")
+df<-load.gwaa.data(phe="/home/aalvarenga/LD/feno_teste2.txt",gen="geno.raw",force=T)
+snp1=check.marker(df,callrate=0.90,perid.call=0.90, maf=0.05,p.level=0.001, ibs.exclude="none") # Genotype quality control
+fixed0<-df[snp1$idok,snp1$snpok]
+
+library("genetics")
+g3=as.genotype(fixed0)
+b<- LD(g3)$"R^2"
+c<- LD(g3)$"D'"
+
+d=as.data.frame(as.table(b))
+d1=na.omit(d)
+colnames(d1)=c("SNP1","SNP2","R2")
+write.table(d1,file="r2_output_3colunas.txt")
+write.table(b,file="r2_output.txt")
+
+e=as.data.frame(as.table(c))
+e1=na.omit(e)
+colnames(e1)=c("SNP1","SNP2","D")
+write.table(e1,file="dlinha_output_3colunas.txt")
+write.table(c,file="dlinha_output.txt")
+
+
+
+#____________________________________________________________ Descriptive analysis of LD ___________________________________________________________________________
+save(list=ls(all.names=TRUE),file="pos_genetics.Rdata")
+sink("sink-examp.txt")
+library("extrafont")
+library("scatterplot3d")
+library("ggplot2")
+library("ggbio")
+library("gridExtra")
+
+dados_limpo<-subset(d1,!(R2=="NA")) # Excluding lines that contain NA in column 3
+n_combinacoes<-nrow(dados_limpo)
+map<-as.data.frame(read.table("/home/aalvarenga/LD/SNP_Map.txt",head=F)) # Importing mapa file with SNP id, chr and position
+colnames(dados_limpo) <- c("SNP1", "SNP2", "R2")
+colnames(map) <- c("SNP1", "chr1", "bp1")
+merge1 <- merge(dados_limpo, map, by = "SNP1", all = FALSE)
+colnames(map) <- c("SNP2", "chr2", "bp2")
+merge2 <- merge(merge1, map, by = "SNP2", all = FALSE)
+dist<-as.matrix(abs(merge2$bp1-merge2$bp2)) # Calculating the distance between SNP1 and SNP2
+merge3<-cbind(merge2,dist)
+
+#...............Descriptive analysis (mean, min and maximum) of LD (R² adjacent) as well distance between.............................................................
+d1b <- map[with(map, order(bp1)), ]
+my.map <- d1b[d1b$SNP1 %in% colnames(b), ] # remove SNPs from the map data not in c
+dim(my.map)
+table(my.map$SNP1 == colnames(b)) # checking the order of SNPs; it looks like the matrix b is already in sorted based on SNP base pair positions 
+
+r2.adj <- array()
+indx <- 1
+for (i in 1:(ncol(b)-1)){
+  cat("i = ", i, '\n')
+  r2.adj[indx] <- b[i, i+1] 
+  indx <- indx + 1
+}
+
+meanr2<-mean(r2.adj)
+sdr2<-sd(r2.adj)
+
+#...............Descriptive analysis (mean, min and maximum) of LD (|D'| adjacent) as well distance between.............................................................
+d1b <- map[with(map, order(bp1)), ]
+my.map <- d1b[d1b$SNP1 %in% colnames(c), ] # remove SNPs from the map data not in c
+dim(my.map)
+table(my.map$SNP1 == colnames(c)) # checking the order of SNPs; it looks like the matrix b is already in sorted based on SNP base pair positions 
+
+D.adj <- array()
+indx <- 1
+for (i in 1:(ncol(c)-1)){
+  cat("i = ", i, '\n')
+  D.adj[indx] <- c[i, i+1] 
+  indx <- indx + 1
+}
+meandlinha<-mean(r2.adj)
+sddlinha<-sd(r2.adj)
+
+ldadjacent<-cbind(meanr2,sdr2,meandlinha,sddlinha)
+write.table(ldadjacent,file="mean_LDadjacent.txt")
+
+#...............Descriptive analysis (mean, min and maximum) of overall LD (R² pairwise) as well distance between.............................................................
+mean_dist<-mean(merge3$dist) 
+sd_dist<-sd(merge3$dist)
+max_dist<-max(merge3$dist)
+min_dist<-min(merge3$dist)
+mean_R2<-mean(merge3$R2)
+sd_R2<-sd(merge3$R2)
+quantis_R2<-quantile(merge3$R2)
+min_R2<-min(merge3$R2)
+max_R2<-max(merge3$R2)
+minimo_limpo<-merge3[merge3[,"R2"] == min_R2,]
+maximo_limpo<-merge3[merge3[,"R2"] == max_R2,]
+grupo<- as.matrix(ifelse(merge3$R2<=0.16, "Low", ifelse((merge3$R2>=0.17 | merge3$R2<=0.30) & (merge3$R2 >=0.37), "High", "Medium"))) # Creating groups of low, medium and high LD
+merge4<-cbind(merge3, grupo)
+media_class<-aggregate(merge4[, c(3,8)], list(merge4$grupo), mean)
+sd_class<-aggregate(merge4[, c(3,8)], list(merge4$grupo), sd)
+freq_class_LD<-table(unlist(merge4$grupo))
+
+grupo_dist<- ifelse(merge4$dist<=1000000, "0-1", ifelse(merge4$dist>1000000 & merge4$dist <=10000000,    #Creating different groups of SNP pairs for different distance between these pairs
+      "1-10", ifelse(merge4$dist>10000000 & merge4$dist<= 20000000, "10-20", 
+         ifelse(merge4$dist>20000000 & merge4$dist<= 30000000, "20-30", 
+        ifelse(merge4$dist>30000000 & merge4$dist<= 40000000, "30-40",
+ ifelse(merge4$dist>40000000 & merge4$dist<= 50000000, "40-50",
+ifelse(merge4$dist> 50000000, "50<",
+ "0"  
+  )))))))    
+merge5<-cbind(merge4, grupo_dist)
+
+
+#................Descriptive analysis (mean, min and maximum) of averall LD (|D'|) as well distance between..........................................................
+Ddados_limpo<-subset(e1,!(D=="NA")) 
+Dn_combinacoes<-nrow(Ddados_limpo)
+colnames(Ddados_limpo) <- c("SNP1", "SNP2", "D")
+colnames(map) <- c("SNP1", "chr1", "bp1")
+Dmerge1 <- merge(Ddados_limpo, map, by = "SNP1", all = FALSE)
+colnames(map) <- c("SNP2", "chr2", "bp2")
+Dmerge2 <- merge(Dmerge1, map, by = "SNP2", all = FALSE)
+Ddist<-as.matrix(abs(Dmerge2$bp1-Dmerge2$bp2))
+Dmerge3<-cbind(Dmerge2,Ddist)
+D_mean<-mean(Dmerge3$D)
+D_sd<-sd(Dmerge3$D)
+quantis_D<-quantile(Dmerge3$D)
+D_min<-min(Dmerge3$D)
+D_max<-max(Dmerge3$D)
+D_minimo_limpo<-Dmerge3[Dmerge3[,"D"] == D_min,]
+D_maximo_limpo<-Dmerge3[Dmerge3[,"D"] == D_max,]
+D_grupo<- as.matrix(ifelse(Dmerge3$D<=0.16, "Low", ifelse((Dmerge3$D>=0.17 | Dmerge3$D<=0.30) & (Dmerge3$D >=0.37), "High", "Medium")))
+D_merge4<-cbind(Dmerge3, D_grupo)
+D_media_class<-aggregate(D_merge4[, c(3,8)], list(D_merge4$D_grupo), mean)
+D_sd_class<-aggregate(D_merge4[, c(3,8)], list(D_merge4$D_grupo), sd)
+D_freq_class_LD<-table(unlist(D_merge4$D_grupo))
+D_grupo_dist<- ifelse(D_merge4$Ddist<=1000000, "0-1", ifelse(D_merge4$Ddist>1000000 & D_merge4$Ddist <=10000000,
+"1-10", ifelse(D_merge4$Ddist>10000000 & D_merge4$Ddist<= 20000000, "10-20", 
+ifelse(D_merge4$Ddist>20000000 & D_merge4$Ddist<= 30000000, "20-30", 
+ifelse(D_merge4$Ddist>30000000 & D_merge4$Ddist<= 40000000, "30-40",
+ifelse(D_merge4$Ddist>40000000 & D_merge4$Ddist<= 50000000, "40-50",
+ifelse(D_merge4$Ddist> 50000000, "50<",
+ "0"  
+      )))))))
+D_merge5<-cbind(D_merge4, D_grupo_dist)
+
+summary_LD<-matrix(c("Mean R2", "SD R2", "Min R2", "Max R2", mean_R2, sd_R2, min_R2, max_R2, "Mean distance intermarker", "SD distance intermarker", "Min distance intermarker", "Max distance intermarker", mean_dist, sd_dist, min_dist, max_dist, " ", " ", " ", " ",
+"Mean D'", "SD D'", "Min D'", "Max D'", D_mean, D_sd, D_min, D_max),nrow=4, ncol=7)
+summary_classr2<-cbind(media_class, sd_class, freq_class_LD)
+SNPs_minimo_maximo_r2<-cbind(minimo_limpo, maximo_limpo)
+summary_classD<-cbind(D_media_class, D_sd_class, D_freq_class_LD)
+SNPs_minimo_maximo_D<-cbind(D_minimo_limpo, D_maximo_limpo)
+
+write.table(summary_LD,file="summary_LD.txt")
+write.table(summary_classr2, file="r2_summary_class.txt")
+write.table(SNPs_minimo_maximo_r2, file="r2_SNPs_minimo_maximo.txt")
+write.table(summary_classD, file="D_summary_class.txt")
+write.table(SNPs_minimo_maximo_D, file="D_SNPs_minimo_maximo.txt")
+
+#..............plot LD vs map distance between SNP pairs...........................................................................................................
+jpeg("plot_r2.jpeg", width = 5, height = 4, units = 'in', res = 1000)
+ggplot(data=merge3,aes(x=(dist/1000000),y=R2)) + geom_point(size=1, aes(color=R2)) + xlab("Map distance (Mp)") + ylab("r-squared")
+dev.off()
+
+jpeg("plot_D.jpeg", width = 5, height = 4, units = 'in', res = 1000)
+ggplot(data=Dmerge3,aes(x=(Ddist/1000000),y=D)) + geom_point(size=1, aes(color=D)) + xlab("Map distance (Mp)") + ylab("D'")
+dev.off()
+
+plot_d <-ggplot(data=Dmerge3,aes(x=(Ddist/1000000),y=D)) + geom_point(size=1, aes(color=D)) + xlab("Map distance (Mp)") + ylab("D'")
+plot_r2 <-ggplot(data=merge3,aes(x=(dist/1000000),y=R2)) + geom_point(size=1, aes(color=R2)) + xlab("Map distance (Mp)") + ylab("r-squared")
+
+jpeg(filename="ld.jpg",width = 5, height = 7, units = 'in', res = 1000)
+tracks(plot_d, plot_r2,theme=theme_bw())
+dev.off()
+
+#.............Excluding the tail of LD graphs: LD=0 and LD>0.99..............................................................................................................
+merge3_1<-merge3[!(merge3$R2==0),]
+merge3_limpo<-merge3_1[!(merge3_1$R2>=0.99 ),]
+Dmerge3_1<-Dmerge3[!(Dmerge3$D==0 ),]
+Dmerge3_limpo<-Dmerge3_1[!(Dmerge3_1$D>=0.99),]
+nrow_r2_antes<-nrow(merge3)
+nrow_r2_depois<-nrow(merge3_limpo)
+nrow_D_antes<-nrow(Dmerge3)
+nrow_D_depois<-nrow(Dmerge3_limpo)
+
+comb_ex_0_99<-matrix(c("N row antes-r2","N row depois- r2", nrow_r2_antes, nrow_r2_depois, "N row antes-D", "N row depois- D", nrow_D_antes, nrow_D_depois), nrow=2,ncol=4)
+write.table(comb_ex_0_99,file="combinacoes_dif0_maior99.txt")
+
+jpeg("plot_r2_limpo.jpeg", width = 5, height = 4, units = 'in', res = 1000)
+ggplot(data=merge3_limpo,aes(x=(dist/1000000),y=R2)) + geom_point(size=1, aes(color=R2)) + xlab("Map distance (Mp)") + ylab("r-squared")
+dev.off()
+
+jpeg("plot_D_limpo.jpeg", width = 5, height = 4, units = 'in', res = 1000)
+ggplot(data=Dmerge3_limpo,aes(x=(Ddist/1000000),y=D)) + geom_point(size=1, aes(color=D)) + xlab("Map distance (Mp)") + ylab("D'")
+dev.off()
+
+plot_d_limpo <-ggplot(data=Dmerge3_limpo,aes(x=(Ddist/1000000),y=D)) + geom_point(size=1, aes(color=D)) + xlab("Map distance (Mp)") + ylab("D'")
+plot_r2_limpo <-ggplot(data=merge3_limpo,aes(x=(dist/1000000),y=R2)) + geom_point(size=1, aes(color=R2)) + xlab("Map distance (Mp)") + ylab("r-squared")
+
+jpeg(filename="ld_limpo.jpg",width = 5, height = 7, units = 'in', res = 1000)
+tracks(plot_d_limpo, plot_r2_limpo,theme=theme_bw())
+dev.off()
+
+
+#...................Graphic of |D'|, specific distance between SNP pairs ..............................................................................................
+Dmerge3_250<-Dmerge3[!(Dmerge3$Ddist<=250000000 ),]
+jpeg("plot_D_250.jpeg", width = 5, height = 4, units = 'in', res = 1000)
+ggplot(data=Dmerge3_250,aes(x=(Ddist/1000000),y=D)) + geom_point(size=1, aes(color=D)) + xlab("Map distance (Mp)") + ylab("D'")
+dev.off()
+
+Dmerge3_200<-Dmerge3[!(Dmerge3$Ddist<=200000000 ),]
+jpeg("plot_D_200.jpeg", width = 5, height = 4, units = 'in', res = 1000)
+ggplot(data=Dmerge3_200,aes(x=(Ddist/1000000),y=D)) + geom_point(size=1, aes(color=D)) + xlab("Map distance (Mp)") + ylab("D'")
+dev.off()
+
+Dmerge3_150<-Dmerge3[!(Dmerge3$Ddist<=150000000 ),]
+jpeg("plot_D_150.jpeg", width = 5, height = 4, units = 'in', res = 1000)
+ggplot(data=Dmerge3_150,aes(x=(Ddist/1000000),y=D)) + geom_point(size=1, aes(color=D)) + xlab("Map distance (Mp)") + ylab("D'")
+dev.off()
+
+Dmerge3_100<-Dmerge3[!(Dmerge3$Ddist<=100000000 ),]
+jpeg("plot_D_100.jpeg", width = 5, height = 4, units = 'in', res = 1000)
+ggplot(data=Dmerge3_100,aes(x=(Ddist/1000000),y=D)) + geom_point(size=1, aes(color=D)) + xlab("Map distance (Mp)") + ylab("D'")
+dev.off()
+
+Dmerge3_50<-Dmerge3[!(Dmerge3$Ddist<=50000000 ),]
+jpeg("plot_D_50.jpeg", width = 5, height = 4, units = 'in', res = 1000)
+ggplot(data=Dmerge3_50,aes(x=(Ddist/1000000),y=D)) + geom_point(size=1, aes(color=D)) + xlab("Map distance (Mp)") + ylab("D'")
+dev.off()
+
+#....................Graphic |D'| clean, specific distance between SNP pair ...........................................................................................
+Dmerge3_250_limpo<-Dmerge3_limpo[!(Dmerge3_limpo$Ddist<=250000000 ),]
+jpeg("plot_D_250_limpo.jpeg", width = 5, height = 4, units = 'in', res = 1000)
+ggplot(data=Dmerge3_250_limpo,aes(x=(Ddist/1000000),y=D)) + geom_point(size=1, aes(color=D)) + xlab("Map distance (Mp)") + ylab("D'")
+dev.off()
+
+Dmerge3_200_limpo<-Dmerge3_limpo[!(Dmerge3_limpo$Ddist<=200000000 ),]
+jpeg("plot_D_200_limpo.jpeg", width = 5, height = 4, units = 'in', res = 1000)
+ggplot(data=Dmerge3_200_limpo,aes(x=(Ddist/1000000),y=D)) + geom_point(size=1, aes(color=D)) + xlab("Map distance (Mp)") + ylab("D'")
+dev.off()
+
+Dmerge3_150_limpo<-Dmerge3_limpo[!(Dmerge3_limpo$Ddist<=150000000 ),]
+jpeg("plot_D_150_limpo.jpeg", width = 5, height = 4, units = 'in', res = 1000)
+ggplot(data=Dmerge3_150_limpo,aes(x=(Ddist/1000000),y=D)) + geom_point(size=1, aes(color=D)) + xlab("Map distance (Mp)") + ylab("D'")
+dev.off()
+
+Dmerge3_100_limpo<-Dmerge3_limpo[!(Dmerge3_limpo$Ddist<=100000000 ),]
+jpeg("plot_D_100_limpo.jpeg", width = 5, height = 4, units = 'in', res = 1000)
+ggplot(data=Dmerge3_100_limpo,aes(x=(Ddist/1000000),y=D)) + geom_point(size=1, aes(color=D)) + xlab("Map distance (Mp)") + ylab("D'")
+dev.off()
+
+Dmerge3_50_limpo<-Dmerge3_limpo[!(Dmerge3_limpo$Ddist<=50000000 ),]
+jpeg("plot_D_50_limpo.jpeg", width = 5, height = 4, units = 'in', res = 1000)
+ggplot(data=Dmerge3_50_limpo,aes(x=(Ddist/1000000),y=D)) + geom_point(size=1, aes(color=D)) + xlab("Map distance (Mp)") + ylab("D'")
+dev.off()
